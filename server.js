@@ -1,113 +1,92 @@
-// // server.js
-// const express = require("express")
-// const http = require("http")
-// const { Server } = require("socket.io")
-// const bodyParser = require("body-parser")
-
-// const app = express()
-// const server = http.createServer(app)
-
-// // Initialize Socket.io
-// const io = new Server(server, {
-//   cors: {
-//     origin: "http://localhost:3000", // Frontend URL
-//     methods: ["GET", "POST"],
-//   },
-// })
-
-// // Middleware to parse JSON request bodies
-// app.use(bodyParser.json())
-
-// let frontendSocket = null
-
-// // Socket connection
-// io.on("connection", (socket) => {
-//   console.log("A user connected")
-//   frontendSocket = socket // Save the connected socket to send messages later
-
-//   // Handle disconnection
-//   socket.on("disconnect", () => {
-//     console.log("User disconnected")
-//     frontendSocket = null
-//   })
-// })
-
-// // POST route for /auphoic-enhance-audio
-// app.post("/auphoic-enhance-audio", (req, res) => {
-//   const payload = req.body
-//   console.log(`Received POST request with payload:`, payload)
-
-//   // Check if there's a connected frontend socket
-//   if (frontendSocket) {
-//     console.log("Sending payload to frontend via socket")
-//     frontendSocket.emit("enhanceAudio", payload) // Send the payload to the frontend
-//   } else {
-//     console.log("No connected frontend socket to send the message.")
-//   }
-
-//   // Respond to the POST request
-//   res.status(200).send("Message sent to frontend via Socket.io")
-// })
-
-// // Start the server
-// server.listen(3001, () => {
-//   console.log("Server is running on http://localhost:3001")
-// })
-
+const { default: axios } = require("axios")
 const express = require("express")
-const bodyParser = require("body-parser")
 const http = require("http")
 const { Server } = require("socket.io")
 
 const app = express()
 const server = http.createServer(app)
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+})
 
 // Parse JSON body in POST requests
 app.use(bodyParser.urlencoded({ extended: true }))
 app.use(bodyParser.json())
 
-let io // Declare `io` here, but don't initialize it yet
+// Webhook endpoint that Auphonic calls when processing is done
+app.post("/auphonic-enhance-audio", async (req, res) => {
+  try {
+    const { uuid: productionId, status, status_string } = req.body
 
-app.get("/", (req, res) => {
-  // Send response back to the client
-  res.status(200).json({ success: true, message: "Server running.." })
-})
+    // Check if status is "Done" and if the productionId exists
+    if (status_string === "Done" && productionId) {
+      // Fetch additional details about the production from Auphonic API
+      const { data } = await axios.get(`https://auphonic.com/api/production/${productionId}.json`)
 
-// POST route that triggers the Socket.io connection
-app.post("/auphoic-enhance-audio", async (req, res) => {
-  const payload = req.body // Parse the payload from the request body
+      // Check if the API call was successful
+      if (data.status_code === 200) {
+        const { metadata, output_files } = data.data
 
-  console.log("Payload received:", payload)
+        // Extract the socketId from the publisher field in the metadata
+        const socketId = metadata?.publisher
 
-  // Initialize the Socket.io connection (only if not already initialized)
-  if (!io) {
-    io = new Server(server, {
-      cors: {
-        origin: "*", // Adjust based on your CORS policy
-        methods: ["GET", "POST"],
-      },
-    })
+        if (socketId) {
+          // Emit the completion event only to the specific client using socketId
+          io.to(socketId).emit("enhanceAudioComplete", {
+            productionId,
+            output_file: output_files[0], // Send the first output file
+          })
+          console.log(`Sent enhanceAudioComplete event to socket ID: ${socketId}`)
+        }
 
-    // Setup connection listener
-    io.on("connection", (socket) => {
-      console.log("A client connected")
-
-      // Handle client disconnection
-      socket.on("disconnect", () => {
-        console.log("A client disconnected")
+        // Respond to Auphonic webhook
+        return res.status(200).json({
+          success: true,
+          data: {
+            productionId,
+            output_file: output_files[0], // Send the first output file in the response
+          },
+        })
+      } else {
+        // Handle cases where the Auphonic API response is not successful
+        console.error("Failed to fetch production details from Auphonic", data)
+        return res.status(500).json({
+          success: false,
+          message: "Failed to fetch production details from Auphonic.",
+        })
+      }
+    } else {
+      // Handle cases where status_string is not "Done" or productionId is missing
+      console.error("Invalid request data", req.body)
+      return res.status(400).json({
+        success: false,
+        message: "Invalid request: production ID or status is missing.",
       })
+    }
+  } catch (error) {
+    // Catch and handle any errors during the process
+    console.error("Error in /auphonic-enhance-audio route:", error)
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while processing the Auphonic webhook.",
+      error: error.message, // Send error details for debugging
     })
   }
+})
 
-  // Emit the payload to all connected clients via Socket.io
-  io.emit("enhanceAudio", payload)
-  console.log("Payload emitted to clients via Socket.io")
+// Socket.io connection handler
+io.on("connection", (socket) => {
+  console.log("A client connected:", socket.id)
 
-  // Send response back to the client
-  res.status(200).json({ success: true, payload })
+  socket.on("disconnect", () => {
+    console.log("A client disconnected:", socket.id)
+  })
 })
 
 const port = process.env.PORT || 3000
 server.listen(port, () => {
-  console.log(`Server is running on port ${port}`)
+  console.log(`Server is running on http://localhost:${port}`)
 })
