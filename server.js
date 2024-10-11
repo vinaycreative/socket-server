@@ -3,6 +3,8 @@ const bodyParser = require("body-parser")
 const express = require("express")
 const http = require("http")
 const { Server } = require("socket.io")
+const API_USERNAME = "hello@shanda.studio"
+const API_PASSWORD = "Harare1992!"
 
 const app = express()
 const server = http.createServer(app)
