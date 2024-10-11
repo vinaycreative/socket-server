@@ -21,15 +21,24 @@ app.use(bodyParser.json())
 app.post("/auphonic-enhance-audio", async (req, res) => {
   try {
     const { uuid: productionId, status, status_string } = req.body
+    console.log("req.body: ", req.body)
 
     // Check if status is "Done" and if the productionId exists
     if (status_string === "Done" && productionId) {
       // Fetch additional details about the production from Auphonic API
-      const { data } = await axios.get(`https://auphonic.com/api/production/${productionId}.json`)
+      const { data } = await axios.get(
+        `https://auphonic.com/api/production/${productionId}.json`,
+        {
+          auth: { username: API_USERNAME, password: API_PASSWORD },
+        }
+      )
 
       // Check if the API call was successful
       if (data.status_code === 200) {
         const { metadata, output_files } = data.data
+
+        console.log("metadata ", metadata)
+        console.log("output_files ", output_files)
 
         // Extract the socketId from the publisher field in the metadata
         const socketId = metadata?.publisher
