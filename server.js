@@ -55,6 +55,7 @@
 // })
 
 const express = require("express")
+const bodyParser = require("body-parser")
 const http = require("http")
 const { Server } = require("socket.io")
 
@@ -62,7 +63,8 @@ const app = express()
 const server = http.createServer(app)
 
 // Parse JSON body in POST requests
-app.use(express.json())
+app.use(bodyParser.urlencoded({ extended: true }))
+app.use(bodyParser.json())
 
 let io // Declare `io` here, but don't initialize it yet
 
@@ -72,10 +74,10 @@ app.get("/", (req, res) => {
 })
 
 // POST route that triggers the Socket.io connection
-app.post("/auphoic-enhance-audio", (req, res) => {
+app.post("/auphoic-enhance-audio", async (req, res) => {
   const payload = req.body // Parse the payload from the request body
 
-  console.log("Payload received at /auphoic-enhance-audio:", payload)
+  console.log("Payload received:", payload)
 
   // Initialize the Socket.io connection (only if not already initialized)
   if (!io) {
