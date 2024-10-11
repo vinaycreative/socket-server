@@ -47,13 +47,11 @@ app.post("/auphonic-enhance-audio", async (req, res) => {
 
         if (socketId) {
           // Emit the completion event only to the specific client using socketId
-          // io.to(socketId).emit("enhanceAudioComplete", {
-          //   productionId,
-          //   output_file: output_files[0], // Send the first output file
-          // })
-          // console.log(`Sent enhanceAudioComplete event to socket ID: ${socketId}`)
-          io.emit("enhanceAudio", payload)
-          console.log("Payload emitted to clients via Socket.io")
+          io.to(socketId).emit("enhanceAudioComplete", {
+            productionId,
+            output_file: output_files[0], // Send the first output file
+          })
+          console.log(`Sent enhanceAudioComplete event to socket ID: ${socketId}`)
         }
 
         // Respond to Auphonic webhook
