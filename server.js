@@ -1,7 +1,7 @@
-const { default: axios } = require("axios")
-const bodyParser = require("body-parser")
 const express = require("express")
+const bodyParser = require("body-parser")
 const http = require("http")
+const axios = require("axios")
 const { Server } = require("socket.io")
 const API_USERNAME = "hello@shanda.studio"
 const API_PASSWORD = "Harare1992!"
@@ -22,70 +22,71 @@ app.use(bodyParser.json())
 // Webhook endpoint that Auphonic calls when processing is done
 app.post("/auphonic-enhance-audio", async (req, res) => {
   try {
-    const { uuid: productionId, status, status_string } = req.body
+    const { uuid: productionId, status } = req.body
 
     // Check if status is "Done" and if the productionId exists
-    if (status_string === "Done" && productionId) {
+    if (status === "Done" && productionId) {
       // Fetch additional details about the production from Auphonic API
       const { data } = await axios.get(
         `https://auphonic.com/api/production/${productionId}.json`,
         {
-          auth: { username: API_USERNAME, password: API_PASSWORD },
+          auth: {
+            username: API_USERNAME, // Use environment variables for API credentials
+            password: API_PASSWORD,
+          },
         }
       )
 
       // Check if the API call was successful
       if (data.status_code === 200) {
         const { metadata, output_files } = data.data
-        // Extract the socketId from the publisher field in the metadata
-        const socketId = metadata?.publisher
+        const socketId = metadata?.publisher // Get socketId from metadata if available
 
-        if (socketId) {
-          // Download the audio file from Auphonic
+        if (socketId && output_files.length > 0) {
+          // Get the download URL of the first output file
           const audioFileUrl = output_files[0].download_url
+
+          // Download the audio file from Auphonic
           const audioFileResponse = await axios.get(audioFileUrl, {
-            responseType: "arraybuffer",
-            auth: { username: API_USERNAME, password: API_PASSWORD },
-          })
-
-          const audioFileBuffer = audioFileResponse.data
-          const audioFileBlob = new Blob([audioFileBuffer], { type: "audio/mp3" })
-
-          // Emit the completion event with the downloaded audio file
-          io.to(socketId).emit("enhanceAudioComplete", {
-            productionId,
-            audioFile: audioFileBlob,
-          })
-          // // Emit the completion event only to the specific client using socketId
-          // io.to(socketId).emit("enhanceAudioComplete", {
-          //   productionId,
-          //   output_file: output_files[0], // Send the first output file
-          // })
-
-          // Success Respond
-          return res.status(200).json({
-            success: true,
-            data: {
-              productionId,
-              audioFile: audioFileBlob,
+            responseType: "arraybuffer", // Get the audio file as array buffer
+            auth: {
+              username: API_USERNAME,
+              password: API_PASSWORD,
             },
           })
+
+          const audioFileBuffer = Buffer.from(audioFileResponse.data)
+
+          // Emit the audio file buffer to the client via socket.io
+          const socket = io.sockets.sockets.get(socketId) // Fetch the socket by ID
+          if (socket) {
+            socket.emit("enhanceAudioComplete", {
+              productionId,
+              audioFile: audioFileBuffer, // Send the audio file buffer
+            })
+            console.log(`Audio sent via socket`)
+            return res.status(200).json({
+              success: true,
+              data: {
+                productionId,
+                audioFile: "Audio sent via socket", // Indicate the audio was sent via socket
+              },
+            })
+          } else {
+            // Handle cases where the socket is not found (client may have disconnected)
+            console.log(`Client with socketId ${socketId} not found.`)
+            return res.status(404).json({
+              success: false,
+              message: `Client with socketId ${socketId} not found.`,
+            })
+          }
         } else {
-          // Handle cases where socketId is missing
+          // Handle missing socketId or output files
           return res.status(400).json({
             success: false,
-            message: "Invalid request: socketId is missing.",
+            message: "Invalid request: socketId is missing or no output files.",
           })
         }
-
-        // // Success Respond
-        // return res.status(200).json({
-        //   success: true,
-        //   data: {
-        //     productionId,
-        //     output_file: output_files[0],
-        //   },
-        // })
       } else {
         // Handle cases where the Auphonic API response is not successful
         return res.status(500).json({
@@ -94,7 +95,7 @@ app.post("/auphonic-enhance-audio", async (req, res) => {
         })
       }
     } else {
-      // Handle cases where status_string is not "Done" or productionId is missing
+      // Handle cases where status is not "Done" or productionId is missing
       return res.status(400).json({
         success: false,
         message: "Invalid request: production ID or status is missing.",
@@ -108,6 +109,15 @@ app.post("/auphonic-enhance-audio", async (req, res) => {
       error: error.message, // Send error details for debugging
     })
   }
+})
+
+// Socket.io connection handler
+io.on("connection", (socket) => {
+  console.log("A client connected:", socket.id)
+
+  socket.on("disconnect", () => {
+    console.log("A client disconnected:", socket.id)
+  })
 })
 
 const port = process.env.PORT || 3000
